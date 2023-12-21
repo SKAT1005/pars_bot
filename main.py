@@ -9,6 +9,7 @@ import django
 import telebot
 from telebot import types
 from telethon.tl.functions.users import GetFullUserRequest
+from yoomoney import Quickpay, Client
 
 os.environ['DJANGO_SETTINGS_MODULE'] = 'pars_bot.settings'
 os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
@@ -17,10 +18,11 @@ from Users.models import Users, Channels, SendMessages
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
-bot = telebot.TeleBot('6701302705:AAG089UoJziV2Kg6WPoN842N00BWqA5I8oo')
-API_ID = '25553568'
-API_HASH = '30576b6fff3d7c61e80bd4cec380d76f'
-API_PHONE = '+996999660415'
+bot = telebot.TeleBot('BOT_TOKEN')
+API_ID = 'API_ID'
+API_HASH = 'API_HASH'
+API_PHONE = 'API_PHONE'
+chat = 'INT_CHAT_ID'
 
 client = TelegramClient('parser', api_id=API_ID, api_hash=API_HASH, system_version="4.16.30-vxCUSTOM")
 client.start(phone=API_PHONE)
@@ -85,73 +87,38 @@ async def get_messages(channel, channel_1, client, targets_word, stop_words):
             channel_1.last_message = messages[0].id
             channel_1.save()
             a = False
-        for message in messages[1:]:
+        for message in messages:
             text = message.message
-            if await check_targets_and_stop_word(text, targets_word, stop_words) and not SendMessages.objects.filter(text=text):
+            if await check_targets_and_stop_word(text, targets_word, stop_words) and not SendMessages.objects.filter(
+                    text=text):
                 SendMessages.objects.create(
                     text=text,
                 )
-                if channel_1.need_send_contacts:
-                    id = message.to_dict()
-                    id = id['from_id']['user_id']
-                    username = await get_full(id, client)
-                    username = f'@{username.users[0].username}'
-                    text = text + f"\n\nКонтакты для связи: {username}"
-                for user in Users.objects.filter(subscription=True):
-                    bot.send_message(chat_id=user.tg_id, text=text)
+                await client.forward_messages(chat, message)
             if message.id <= c:
                 finish_check_message = False
                 break
         offset_msg = messages[-1].id
 
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    user_id = message.from_user.id
-    try:
-        bot.delete_message(chat_id=user_id, message_id=message.id)
-    except Exception:
-        pass
-    try:
-        Users.objects.get(tg_id=user_id)
-    except Exception:
-        Users.objects.create(
-            tg_id=user_id,
-            username=message.from_user.username
-        )
-    menu(chat_id=user_id)
-
-
-def menu(chat_id):
-    subscribtion = len(Users.objects.filter(subscription=True))
-    markup = types.InlineKeyboardMarkup()
-    user = Users.objects.get(tg_id=chat_id)
-    if not user.subscription:
-        button1 = types.InlineKeyboardButton(text='Купить подписку', callback_data='subscribe')
-        markup.add(button1)
-    if user.is_admin:
-        button2 = types.InlineKeyboardButton(text='Админ-панель', callback_data='admin')
-        markup.add(button2)
-    bot.send_message(
-        text=f'Добро пожаловать в нашего бота. Уже более {subscribtion} швейных производств получают сообщения мгновенно!',
-        chat_id=chat_id, reply_markup=markup)
-
-
-def pagination(markup, page, pagination_start, pagination_end, counter, category=None):
-    if pagination_start == 0 and pagination_end < counter:
-        next_page = types.InlineKeyboardButton('Следующая страница',
-                                               callback_data=f'next_page|{page}|{pagination_start}|{pagination_end}|{category}')
-        markup.add(next_page)
-    elif pagination_start > 0 and pagination_end >= counter:
-        last_page = types.InlineKeyboardButton('Предыдущая страница',
-                                               callback_data=f'last_page|{page}|{pagination_start}|{pagination_end}|{category}')
-        markup.add(last_page)
-    elif pagination_start > 0 and pagination_end < counter:
-        next_page = types.InlineKeyboardButton('Следующая страница',
-                                               callback_data=f'next_page|{page}|{pagination_start}|{pagination_end}|{category}')
-        last_page = types.InlineKeyboardButton('Предыдущая страница',
-                                               callback_data=f'last_page|{page}|{pagination_start}|{pagination_end}|{category}')
-        markup.add(last_page, next_page)
+@bot.callback_query_handler(func=lambda call: True)
+def callback(call):
+    message_id = call.message.id
+    chat_id = call.message.chat.id
+    if call.message:
+        data = call.data
+        try:
+            bot.delete_message(chat_id=chat_id, message_id=message_id)
+        except Exception:
+            pass
+        if data.split('|')[0] == 'approve':
+            month = int(data.split('|')[1])
+            id = data.split('|')[2]
+            user = Users.objects.get(tg_id=id)
+            user.end_subscription = datetime.date.today() + datetime.timedelta(30 * month)
+            user.subscription = True
+            user.save()
+            bot.approve_chat_join_request(chat_id=chat, user_id=id)
 
 
 def subscribe(user_id):
@@ -159,10 +126,12 @@ def subscribe(user_id):
     one_month = types.LabeledPrice(label='Подписка на 1 месяц', amount=int(600) * 100)
     three_month = types.LabeledPrice(label='Подписка на 1 месяц', amount=int(1500) * 100)
     a = bot.create_invoice_link(title='Подписка на один месяц', description='Подписка на один месяц', currency='rub',
-                                prices=[one_month], provider_token='410694247:TEST:eb41a4f2-318a-4c60-a7e1-3fffa4e401b3',
+                                prices=[one_month],
+                                provider_token='410694247:TEST:eb41a4f2-318a-4c60-a7e1-3fffa4e401b3',
                                 payload='test-invoice-payload')
     b = bot.create_invoice_link(title='Подписка на три месяца', description='Подписка на три месяца', currency='rub',
-                                prices=[three_month], provider_token='410694247:TEST:eb41a4f2-318a-4c60-a7e1-3fffa4e401b3',
+                                prices=[three_month],
+                                provider_token='410694247:TEST:eb41a4f2-318a-4c60-a7e1-3fffa4e401b3',
                                 payload='test-invoice-payload', )
     pay1 = types.InlineKeyboardButton(text='Купить подписку на 1 месяц', url=a)
     pay2 = types.InlineKeyboardButton(text='Купить подписку на 2 месяца', url=b)
@@ -170,57 +139,76 @@ def subscribe(user_id):
     bot.send_message(chat_id=user_id, text='Купить подписку', reply_markup=markup)
 
 
-@bot.shipping_query_handler(func=lambda query: True)
-def shipping(shipping_query):
-    bot.answer_shipping_query(shipping_query.id, ok=True, shipping_options=shipping_query,
-                              error_message='Oh, seems like our Dog couriers are having a lunch right now. Try again later!')
+def pay_yoo_money(chat_id):
+    pay1 = Quickpay(
+        receiver="410019014512803",
+        quickpay_form="shop",
+        targets="one_months",
+        paymentType="SB",
+        sum=600,
+        label=str(chat_id)
+    )
+    pay2 = Quickpay(
+        receiver="410019014512803",
+        quickpay_form="shop",
+        targets="three_months",
+        paymentType="SB",
+        sum=1100,
+        label=str(chat_id)
+    )
+    pay3 = Quickpay(
+        receiver="410019014512803",
+        quickpay_form="shop",
+        targets="six_months",
+        paymentType="SB",
+        sum=1500,
+        label=str(chat_id)
+    )
+    markup = types.InlineKeyboardMarkup()
+    pay1 = types.InlineKeyboardMarkup('Подписка на один месяц', url=pay1.redirected_url)
+    pay2 = types.InlineKeyboardMarkup('Подписка на три месяца', url=pay2.redirected_url)
+    pay3 = types.InlineKeyboardMarkup('Подписка на шесть месяцев', url=pay3.redirected_url)
+    markup.add(pay1, pay2, pay3)
+    bot.send_message(chat_id=chat_id, text='Подписка', reply_markup=markup)
 
 
-@bot.pre_checkout_query_handler(func=lambda query: True)
-def checkout(pre_checkout_query):
-    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True,
-                                  error_message="Aliens tried to steal your card's CVV, but we successfully protected your credentials,"
-                                                " try to pay again in a few minutes, we need a small rest.")
+def check_pay_card(message, chat_id):
+    text = message.text
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    user = Users.objects.get(chat_id=chat_id)
+    approve1 = types.InlineKeyboardButton(text='Одобрить 1 месяц', callback_data=f'approve|1|{user.tg_id}')
+    approve2 = types.InlineKeyboardButton(text='Одобрить 2 месяца', callback_data=f'approve|2|{user.tg_id}')
+    approve3 = types.InlineKeyboardButton(text='Одобрить 3 месяца', callback_data=f'approve|3|{user.tg_id}')
+    cancel = types.InlineKeyboardButton(text='Отказать', callback_data=f'cancel|{user.tg_id}')
+    markup.add(approve1, approve2, approve3, cancel)
+    admins = Users.objects.filter(is_admin=True)
+    for admin in admins:
+        bot.send_message(chat_id=admin.tg_id, text=f'{user.tg_id} Перевел оплату на вашу карту. Его ФИО: {text}',
+                         reply_markup=markup)
+    bot.send_message(chat_id=chat_id, text='')
 
 
-@bot.message_handler(content_types=['successful_payment'])
-def got_payment(message):
-    print(message)
-    user = Users.objects.get(tg_id=message.chat.id)
-    user.subscription = True
-    if message.successful_payment.total_amount == 600*100:
-        user.end_subscription = datetime.date.today() + datetime.timedelta(30)
-    elif message.successful_payment.total_amount == 1500*100:
-        user.end_subscription = datetime.date.today() + datetime.timedelta(90)
-    user.save()
-    bot.send_message(message.chat.id, 'Оплата прошла успешно! Ваша подписка подключена')
-    menu(message.chat.id)
+def pay_card(chat_id):
+    msg = bot.send_message(chat_id=chat_id,
+                           text='Переведите оплату на этот номер телефона и скиньте ФИО того, кто переводил в этот чат\n\n'
+                                '600 рблей - месяц\n'
+                                '1100 рублей - 2 месяца\n'
+                                '1600 рублей - 3 месяца')
+    bot.register_next_step_handler(msg, check_pay_card, chat_id)
 
 
-@bot.callback_query_handler(func=lambda call: True)
-def callback(call):
-    message_id = call.message.id
-    chat_id = call.message.chat.id
-    user = Users.objects.get(tg_id=call.from_user.id)
-    if call.message:
-        data = call.data
-        try:
-            bot.delete_message(chat_id=chat_id, message_id=message_id)
-        except Exception:
-            pass
-        if data == 'admin':
-            admin_panel(chat_id)
-
-        elif data == 'subscribe':
-            subscribe(user_id=chat_id)
-
-
-async def main_wrapper():
-    await main()
-
-
-async def polling_wrapper():
-    bot.polling(none_stop=True)
+@bot.chat_join_request_handler()
+def main(message: telebot.types.ChatJoinRequest):
+    chat_id = message.chat.id
+    try:
+        Users.objects.get(chat_id=chat_id)
+    except Users.DoesNotExist:
+        Users.objects.create(chat_id=chat_id, username=message.from_user.username)
+    markup = types.InlineKeyboardMarkup()
+    pay1 = types.InlineKeyboardMarkup('Опталить в YooMoney', callback_data='yoomoney')
+    pay2 = types.InlineKeyboardButton('Оплатить переводом на карту', callback_data='card')
+    markup.add(pay1, pay2)
+    msg = bot.send_message(message.user_chat_id, text="Подписка", reply_markup=markup)
 
 
 def check_subscribe():
@@ -239,11 +227,34 @@ def polling_process():
     bot.polling(none_stop=True)
 
 
+def check_pay_yoomoney():
+    client_yoominey = Client()
+    while True:
+        users = Users.objects.filter(is_pay=True)
+        for i in users:
+            for f in range(10):
+                history = client.operation_history(label=i.tg_id)
+                for operation in history.operations:
+                    if operation.status == 'success':
+                        if operation.amount == 600:
+                            month = 1
+                        elif operation.amount == 1100:
+                            month = 2
+                        elif operation.amount == 1600:
+                            month = 3
+                        i.is_pay = False
+                        i.subscription = True
+                        i.end_subscription = datetime.date.today() + datetime.timedelta(30 * month)
+                        bot.approve_chat_join_request(chat_id=chat, user_id=i.tg_id)
+                        i.save()
+        sleep(30)
+
+
 if __name__ == '__main__':
     polling_thread = threading.Thread(target=polling_process)
     polling_thread.start()
     check_subscribe_thread = threading.Thread(target=check_subscribe)
     check_subscribe_thread.start()
-    sleep(3)
+    sleep(0.5)
     loop = asyncio.get_event_loop()
     loop.run_until_complete(main())
