@@ -7,6 +7,7 @@ class Users(models.Model):
     tg_id = models.CharField(max_length=128, verbose_name='ID пользователя в телеграмме')
     username = models.CharField(max_length=64, verbose_name='Ник пользовател в телеграмме')
     subscription = models.BooleanField(default=False, verbose_name='Есть ли у пользователя подписка')
+    is_pay = models.BooleanField(default=False, verbose_name='Начал ли оплату на YooMoney')
     is_admin = models.BooleanField(default=False, verbose_name='Является ли пользователь админом')
     end_subscription = models.DateField(default=None, null=True, verbose_name='Дата окончания подписки')
 
